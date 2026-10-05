@@ -54,10 +54,10 @@ test('shows the cost and a bar for each percent on every surface', async ($, on)
     const texts = await ui.findAll({ type: 'Text' })
 
     expect(texts.map(text => text.text).join('')).toBe(
-      '$1.24 · ■■■□□□□□□□ 38% · ■■■■■■■□□□ 78% 2h 10m · ■■■■■■■■■□ 91% 3d 4h',
+      '$1.24 · ■■■□□□□□□□ 38% · ■■■■■■■□□□ 78% 1.4× 2h 10m, full in 48m · ■■■■■■■■■□ 91% 1.7× 3d 4h, full in 8h 53m',
     )
     expect((await ui.find({ type: 'Text', text: '38%' }))?.props.color).toBe(COLORS.low)
-    expect((await ui.find({ type: 'Text', text: '78%' }))?.props.color).toBe(COLORS.high)
+    expect((await ui.find({ type: 'Text', text: '78%' }))?.props.color).toBe(COLORS.full)
     expect((await ui.find({ type: 'Text', text: '91%' }))?.props.color).toBe(COLORS.full)
     expect((await ui.find({ type: 'Text', text: '■■■■■■■■■' }))?.props.color).toBe(COLORS.full)
     expect((await ui.find({ type: 'Text', text: '$1.24' }))?.props.color).toBe(COLORS.cost)
@@ -95,9 +95,69 @@ test('gets shorter in steps when the terminal is narrow', async ($, on) => {
 
   await measure($)
 
+  expect(await lineOf($, 90)).toBe(
+    '$1.24 · ■■■□□□□□□□ 38% · ■■■■■■■□□□ 78% 1.4× 2h 10m · ■■■■■■■■■□ 91% 1.7× 3d 4h',
+  )
+  expect(await lineOf($, 70)).toBe('$1.24 · ■□□□□ 38% · ■■■□□ 78% 1.4× 2h 10m · ■■■■□ 91% 1.7× 3d 4h')
   expect(await lineOf($, 60)).toBe('$1.24 · ■□□□□ 38% · ■■■□□ 78% 2h 10m · ■■■■□ 91% 3d 4h')
   expect(await lineOf($, 50)).toBe('$1.24 · ■□□□□ 38% · ■■■□□ 78% · ■■■■□ 91%')
   expect(await lineOf($, 30)).toBe('$1.24 · 38% · 78% · 91%')
+})
+
+// A 5-hour window with 2h 23m left: 52% of its time has passed.
+const fiveHour = (percentUsed: number, leftMs = 2 * HOUR + 23 * 60_000) => [
+  { kind: 'five_hour', percentUsed, resetsAt: new Date(NOW + leftMs).toISOString() },
+]
+
+const PACES = [
+  { percentUsed: 20, shown: '■■□□□□□□□□ 20% 0.4× 2h 23m', color: COLORS.slow },
+  { percentUsed: 50, shown: '■■■■■□□□□□ 50% 1.0× 2h 23m', color: COLORS.low },
+  { percentUsed: 60, shown: '■■■■■■□□□□ 60% 1.1× 2h 23m', color: COLORS.high },
+  { percentUsed: 80, shown: '■■■■■■■■□□ 80% 1.5× 2h 23m, full in 39m', color: COLORS.full },
+]
+
+test('colors a limit window by its pace, and says when a fast one will be full', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+
+  for (const { percentUsed, shown, color } of PACES) {
+    await measure($, fiveHour(percentUsed))
+
+    const ui = await $.ui.mount({ ...bandOf(120), surface: 'terminal' })
+    const texts = await ui.findAll({ type: 'Text' })
+
+    expect(texts.map(text => text.text).join('')).toBe(`$1.24 · ■■■□□□□□□□ 38% · ${shown}`)
+    expect((await ui.find({ type: 'Text', text: `${percentUsed}%` }))?.props.color).toBe(color)
+    expect((await ui.find({ type: 'Text', text: '×' }))?.props.color).toBe(color)
+    await ui.unmount()
+  }
+})
+
+test('gives no pace in the first tenth of a window, or for a window of unknown length', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+
+  await measure($, fiveHour(8, 4 * HOUR + 40 * 60_000))
+  expect(await lineOf($, 120)).toBe('$1.24 · ■■■□□□□□□□ 38% · □□□□□□□□□□ 8% 4h 40m')
+
+  await measure($, [
+    { kind: 'spend_limit', percentUsed: 80, resetsAt: new Date(NOW + 2 * HOUR).toISOString() },
+  ])
+  expect(await lineOf($, 120)).toBe('$1.24 · ■■■□□□□□□□ 38% · ■■■■■■■■□□ 80% 2h 0m')
+})
+
+test('is red from 90% even when the pace is fine', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+
+  await measure($, fiveHour(92, 10 * 60_000))
+
+  const ui = await $.ui.mount({ ...bandOf(120), surface: 'terminal' })
+
+  expect((await ui.find({ type: 'Text', text: '92%' }))?.props.color).toBe(COLORS.full)
+  expect((await ui.find({ type: 'Text', text: '1.0×' }))?.props.color).toBe(COLORS.full)
+  expect(await ui.find({ type: 'Text', text: 'full in' })).toBeFalsy()
+  await ui.unmount()
 })
 
 test('shows 0% for a window that has reset since the last reading', async ($, on) => {
@@ -111,7 +171,7 @@ test('shows 0% for a window that has reset since the last reading', async ($, on
   const line = await lineOf($, 120)
 
   expect(line).toContain('□□□□□□□□□□ 0% · ')
-  expect(line).toContain('91% 3d 1h')
+  expect(line).toContain('91% 1.6× 3d 1h')
 })
 
 test('shows only cost and context when the account has no limit windows', async ($, on) => {

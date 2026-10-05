@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionUsage } from 'claude-code'
 
-import type { Identity, Snapshot, Style } from '../types'
+import type { Identity, Limit, Snapshot, Style } from '../types'
 import { COLORS } from './colors'
 import { DEFAULT_STYLE, NAMES, STYLES, styleOf } from './styles'
 
@@ -18,20 +18,34 @@ const STYLE_KEY = 'style'
 const ORDER = ['five_hour', 'seven_day', 'spend_limit']
 const SEPARATOR = ' · '
 const MINUTE = 60_000
+const HOUR = 60 * MINUTE
+
+// How long each limit window is. A kind that is not here gets no pace.
+const WINDOWS: Record<string, number> = { five_hour: 5 * HOUR, seven_day: 168 * HOUR }
+
+// Pace is the percent used divided by the percent of the window's time that has passed,
+// to one decimal: at 1.0 the limit is reached exactly at the reset.
+const PACE = { slow: 0.66, onTrack: 1, fast: 1.2 }
+
+// A pace from the first tenth of a window says nothing yet, so none is given.
+const PACE_FROM = 0.1
 
 const EMAIL = /([^\s@<>"']+)@[^\s@<>"']+/
 
 // From widest to narrowest; the line takes the first that fits.
 const LAYOUTS = [
-  { cells: 10, hasResets: true },
-  { cells: 5, hasResets: true },
-  { cells: 5, hasResets: false },
-  { cells: 0, hasResets: false },
+  { cells: 10, hasResets: true, hasPace: true, hasFullIn: true },
+  { cells: 10, hasResets: true, hasPace: true, hasFullIn: false },
+  { cells: 5, hasResets: true, hasPace: true, hasFullIn: false },
+  { cells: 5, hasResets: true, hasPace: false, hasFullIn: false },
+  { cells: 5, hasResets: false, hasPace: false, hasFullIn: false },
+  { cells: 0, hasResets: false, hasPace: false, hasFullIn: false },
 ] as const
 
 type Layout = (typeof LAYOUTS)[number]
 type Piece = { text: string; color?: string; isBold?: boolean }
-type Gauge = { percent: number; reset?: string }
+// fullIn is how long until the limit is reached, given only when the pace is too fast.
+type Gauge = { percent: number; reset?: string; pace?: number; fullIn?: string }
 type Figures = Pick<SessionUsage, 'context' | 'rateLimits' | 'cost'>
 
 const snapshotOf = (figures: Figures): Snapshot => ({
@@ -50,9 +64,13 @@ const rankOf = (kind: string): number => {
   return rank === -1 ? ORDER.length : rank
 }
 
-const colorOf = (percent: number): string => {
+// A gauge with a pace takes its color from the pace; from 90% every gauge is red.
+const colorOf = (percent: number, pace?: number): string => {
   if (percent >= 90) return COLORS.full
-  if (percent >= 75) return COLORS.high
+  if (pace === undefined) return percent >= 75 ? COLORS.high : COLORS.low
+  if (pace > PACE.fast) return COLORS.full
+  if (pace > PACE.onTrack) return COLORS.high
+  if (pace < PACE.slow) return COLORS.slow
 
   return COLORS.low
 }
@@ -72,6 +90,23 @@ const durationOf = (ms: number): string => {
 const modelNameOf = (model: string): string =>
   model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
 
+// The pace of a window whose reset is still to come, and the time until it is full.
+const paceOf = (limit: Limit, resetsAt: number, nowMs: number): Pick<Gauge, 'pace' | 'fullIn'> => {
+  const length = WINDOWS[limit.kind]
+
+  if (length === undefined) return {}
+
+  const passed = length - (resetsAt - nowMs)
+
+  if (passed < length * PACE_FROM) return {}
+
+  const pace = Math.round((limit.percentUsed / 100 / (passed / length)) * 10) / 10
+
+  if (pace <= PACE.fast || limit.percentUsed >= 100) return { pace }
+
+  return { pace, fullIn: durationOf((passed * (100 - limit.percentUsed)) / limit.percentUsed) }
+}
+
 // The context window first, then each limit window in ORDER.
 const gaugesOf = (snapshot: Snapshot, nowMs: number): Gauge[] => {
   const gauges: Gauge[] = []
@@ -89,7 +124,11 @@ const gaugesOf = (snapshot: Snapshot, nowMs: number): Gauge[] => {
       // The window has reset since the last reading, so the old percent is no longer true.
       gauges.push({ percent: 0 })
     } else {
-      gauges.push({ percent: limit.percentUsed, reset: durationOf(limit.resetsAt - nowMs) })
+      gauges.push({
+        percent: limit.percentUsed,
+        reset: durationOf(limit.resetsAt - nowMs),
+        ...paceOf(limit, limit.resetsAt, nowMs),
+      })
     }
   }
 
@@ -98,7 +137,7 @@ const gaugesOf = (snapshot: Snapshot, nowMs: number): Gauge[] => {
 
 const gaugePiecesOf = (gauge: Gauge, layout: Layout, bar: Style): Piece[] => {
   const percent = Math.round(gauge.percent)
-  const color = colorOf(percent)
+  const color = colorOf(percent, gauge.pace)
   // Rounded down, so a bar is full only at 100%.
   const filled = Math.min(layout.cells, Math.max(0, Math.floor((percent / 100) * layout.cells)))
   const pieces: Piece[] = []
@@ -108,7 +147,15 @@ const gaugePiecesOf = (gauge: Gauge, layout: Layout, bar: Style): Piece[] => {
 
   pieces.push({ text: `${layout.cells > 0 ? ' ' : ''}${percent}%`, color, isBold: true })
 
+  if (layout.hasPace && gauge.pace !== undefined) {
+    pieces.push({ text: ` ${gauge.pace.toFixed(1)}×`, color })
+  }
+
   if (layout.hasResets && gauge.reset !== undefined) pieces.push({ text: ` ${gauge.reset}` })
+
+  if (layout.hasFullIn && gauge.fullIn !== undefined) {
+    pieces.push({ text: `, full in ${gauge.fullIn}`, color })
+  }
 
   return pieces
 }
