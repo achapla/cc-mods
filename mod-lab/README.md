@@ -2,6 +2,9 @@
 
 A mod for learning what Claude Code mods can do.
 
+I made it to try the mod API before I wrote my other mods, and I still use it when I want to
+see what an event holds. It is useful only if you write mods yourself.
+
 It has three parts:
 
 - **Events**: a live list of the events that a mod can hook, with the data of each one.
@@ -11,10 +14,18 @@ It has three parts:
 A mod is a plugin of function hooks. The mod API is early access, so it can change between
 releases of Claude Code.
 
+![The mod-lab pane next to the conversation](../docs/screenshots/mod-lab.png)
+
 ## Install
 
-This mod is part of the `cc-mods` marketplace (the folder above this one). It is enabled for
-this project only, in `.claude/settings.json`:
+This mod is for learning, so install it for one project only. Run this in that project:
+
+```
+claude plugin marketplace add achapla/cc-mods
+claude plugin install mod-lab@cc-mods --scope project
+```
+
+In a clone of this repository it is enabled already, in `.claude/settings.json`:
 
 ```json
 {
@@ -22,12 +33,6 @@ this project only, in `.claude/settings.json`:
     "mod-lab@cc-mods": true
   }
 }
-```
-
-To enable it in another project, run this in that project:
-
-```
-claude plugin install mod-lab@cc-mods --scope project
 ```
 
 After you change the code, run `/reload-plugins` in the session.
