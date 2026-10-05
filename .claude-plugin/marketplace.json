@@ -11,7 +11,7 @@
     {
       "name": "done-sound",
       "source": "./done-sound",
-      "description": "Plays a sound when a long turn ends and when Claude waits for your answer."
+      "description": "Plays a sound, picked by chance from the ones you chose, when a long turn ends and when Claude waits for your answer."
     },
     {
       "name": "no-new-branch",

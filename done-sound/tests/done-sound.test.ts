@@ -1,14 +1,39 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { MIN_TURN_MS } from '../hooks/register'
+import { LIBRARY, STARTERS, choicesOf, pick, requestOf } from '../hooks/sounds'
 
-// Stands for the engine on a Windows machine: records each command that would play a sound.
-const world = (on: On, variables: Record<string, string> = { SystemRoot: 'C:\\Windows' }) => {
+const WINDOWS = { SystemRoot: 'C:\\Windows' }
+// One sound for each moment, so a test knows which file plays.
+const ONE_EACH = { ask: ['siren'], done: ['khatam'] }
+
+const question = () => ({
+  tool: 'AskUserQuestion' as const,
+  questions: [
+    {
+      question: 'Which one?',
+      header: 'Choice',
+      options: [
+        { label: 'A', description: 'The first one' },
+        { label: 'B', description: 'The second one' },
+      ],
+      multiSelect: false,
+    },
+  ],
+})
+
+// Stands for the engine: keeps the store in memory and records each command that would play a sound.
+const world = (
+  on: On,
+  { variables = WINDOWS, sounds = ONE_EACH }: { variables?: Record<string, string>; sounds?: unknown } = {},
+) => {
   const clock = mock.clock(on)
   const played: string[] = []
 
   mock.env(on, variables)
+  mock.store(on, sounds === null ? {} : { sounds })
   on('process.run', (_$, e) => {
     played.push(e.argv.join(' '))
 
@@ -18,13 +43,15 @@ const world = (on: On, variables: Record<string, string> = { SystemRoot: 'C:\\Wi
   })
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
-  on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => ({
-    result: { questions: e.questions, answers: {} },
-  }))
   on('classic.Notification', () => ({}))
 
   return { clock, played }
 }
+
+const answerQuestions = (on: On) =>
+  on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => ({
+    result: { questions: e.questions, answers: {} },
+  }))
 
 const turn = (durationMs: number, more: { agentId?: string; isAborted?: boolean } = {}) => ({
   answer: 'Done.',
@@ -35,6 +62,52 @@ const turn = (durationMs: number, more: { agentId?: string; isAborted?: boolean 
   ...(more.agentId === undefined ? {} : { agentId: more.agentId }),
 })
 
+const run = async ($: Engine, args: string) =>
+  (
+    await $.command.run({
+      command: 'sounds',
+      args,
+      origin: { kind: 'composer' },
+      presentation: { isFullscreen: false, columns: 120 },
+    })
+  ).text ?? ''
+
+// The name of the sound file in a recorded player command.
+const soundOf = (command: string | undefined): string => /([\w-]+)\.wav/.exec(command ?? '')?.[1] ?? ''
+
+test('every starting sound is in the library', () => {
+  for (const name of [...STARTERS.ask, ...STARTERS.done]) {
+    expect(LIBRARY).toContain(name)
+  }
+})
+
+test('picks by chance, and not the sound that played last', () => {
+  expect(pick([], undefined, 0.5)).toBeUndefined()
+  expect(pick(['a'], 'a', 0.5)).toBe('a')
+  expect(pick(['a', 'b'], 'a', 0)).toBe('b')
+  expect(pick(['a', 'b', 'c'], undefined, 0)).toBe('a')
+  expect(pick(['a', 'b', 'c'], undefined, 0.99)).toBe('c')
+  expect(pick(['a', 'b', 'c'], 'c', 0.99)).toBe('b')
+})
+
+test('reads the saved choices and leaves out names that are not sounds', () => {
+  expect(choicesOf(null)).toEqual(STARTERS)
+  expect(choicesOf({ ask: ['siren', 'nope', 7] })).toEqual({ ask: ['siren'], done: STARTERS.done })
+  expect(choicesOf({ ask: [], done: ['scooby'] })).toEqual({ ask: [], done: ['scooby'] })
+})
+
+test('understands the text after /sounds', () => {
+  expect(requestOf('')).toEqual({ action: 'list' })
+  expect(requestOf('ask Faaah, error faaah')).toEqual({ action: 'set', moment: 'ask', names: ['faaah', 'error'] })
+  expect(requestOf('done none')).toEqual({ action: 'set', moment: 'done', names: [] })
+  expect(requestOf('play siren')).toEqual({ action: 'play', name: 'siren' })
+  expect(requestOf('reset')).toEqual({ action: 'reset' })
+  expect(requestOf('ask').action).toBe('help')
+  expect(requestOf('ask bark').action).toBe('help')
+  expect(requestOf('play').action).toBe('help')
+  expect(requestOf('dance').action).toBe('help')
+})
+
 test('plays the done sound when a long turn ends', async ($, on) => {
   const { clock, played } = world(on)
 
@@ -43,7 +116,7 @@ test('plays the done sound when a long turn ends', async ($, on) => {
 
   expect(played).toHaveLength(1)
   expect(played[0]).toContain('powershell.exe')
-  expect(played[0]).toContain("'C:\\Windows\\Media\\tada.wav'")
+  expect(played[0]).toContain("\\sounds\\khatam.wav'")
 })
 
 test('stays silent for a short turn, a stopped turn and a subagent turn', async ($, on) => {
@@ -59,27 +132,13 @@ test('stays silent for a short turn, a stopped turn and a subagent turn', async 
 
 test('plays the ask sound when a question dialog opens', async ($, on) => {
   const { clock, played } = world(on)
+  answerQuestions(on)
 
-  await $.tool.call({
-    tool: 'AskUserQuestion',
-    questions: [
-      {
-        question: 'Which one?',
-        header: 'Choice',
-        options: [
-          { label: 'A', description: 'The first one' },
-          { label: 'B', description: 'The second one' },
-        ],
-        multiSelect: false,
-      },
-    ],
-  })
+  await $.tool.call(question())
   await clock.advance(10)
 
   expect(played).toHaveLength(1)
-  // The mod's own file, not a system one.
-  expect(played[0]).toContain("\\sounds\\ask.wav'")
-  expect(played[0]).not.toContain('C:\\Windows\\Media')
+  expect(played[0]).toContain("\\sounds\\siren.wav'")
 })
 
 test('plays the ask sound for a permission prompt, but not for other notifications', async ($, on) => {
@@ -89,8 +148,7 @@ test('plays the ask sound for a permission prompt, but not for other notificatio
   await $.classic.Notification({ message: 'Claude is waiting', notification_type: 'idle_prompt' })
   await clock.advance(10)
 
-  expect(played).toHaveLength(1)
-  expect(played[0]).toContain('ask.wav')
+  expect(played.map(soundOf)).toEqual(['siren'])
 })
 
 test('counts the time a dialog waited, which the reported duration leaves out', async ($, on) => {
@@ -101,23 +159,11 @@ test('counts the time a dialog waited, which the reported duration leaves out', 
   await $.turn.complete(turn(6000))
   await clock.advance(10)
 
-  expect(played).toHaveLength(1)
-  expect(played[0]).toContain('tada.wav')
+  expect(played.map(soundOf)).toEqual(['khatam'])
 })
 
 test('plays one sound, not two, when a notification comes while a question is open', async ($, on) => {
-  const clock = mock.clock(on)
-  const played: string[] = []
-
-  mock.env(on, { SystemRoot: 'C:\\Windows' })
-  on('process.run', (_$, e) => {
-    played.push(e.argv.join(' '))
-
-    return {
-      value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
-    }
-  })
-  on('classic.Notification', () => ({}))
+  const { clock, played } = world(on)
   // The dialog stays open while the engine raises its "waiting for input" notification.
   on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
     await $.classic.Notification({ message: 'Claude is waiting', notification_type: 'elicitation_dialog' })
@@ -125,31 +171,60 @@ test('plays one sound, not two, when a notification comes while a question is op
     return { result: { questions: e.questions, answers: {} } }
   })
 
-  await $.tool.call({
-    tool: 'AskUserQuestion',
-    questions: [
-      {
-        question: 'Which one?',
-        header: 'Choice',
-        options: [
-          { label: 'A', description: 'The first one' },
-          { label: 'B', description: 'The second one' },
-        ],
-        multiSelect: false,
-      },
-    ],
-  })
+  await $.tool.call(question())
   await $.classic.Notification({ message: 'Claude needs your permission', notification_type: 'permission_prompt' })
   await clock.advance(10)
 
   expect(played).toHaveLength(2)
 })
 
-test('uses the macOS player when the machine is not Windows',async ($, on) => {
-  const { clock, played } = world(on, {})
+test('uses the macOS player when the machine is not Windows', async ($, on) => {
+  const { clock, played } = world(on, { variables: {} })
 
   await $.turn.complete(turn(MIN_TURN_MS))
   await clock.advance(10)
 
-  expect(played).toEqual(['afplay /System/Library/Sounds/Glass.aiff'])
+  expect(played).toHaveLength(1)
+  expect(played[0]).toMatch(/^afplay .*\/sounds\/khatam\.wav$/)
+})
+
+test('with nothing saved, plays one of the starting sounds and never the same one twice in a row', async ($, on) => {
+  const { clock, played } = world(on, { sounds: null })
+
+  for (let count = 0; count < 12; count += 1) {
+    await $.classic.Notification({ message: 'Claude needs your permission', notification_type: 'permission_prompt' })
+    await clock.advance(10)
+  }
+
+  const names = played.map(soundOf)
+
+  expect(names).toHaveLength(12)
+
+  for (const [index, name] of names.entries()) {
+    expect(STARTERS.ask).toContain(name)
+    expect(name).not.toBe(names[index - 1])
+  }
+})
+
+test('/sounds sets, silences, plays and resets', async ($, on) => {
+  const { clock, played } = world(on)
+
+  expect(await run($, '')).toContain('ask  siren')
+  expect(await run($, 'done scooby')).toContain('scooby')
+
+  await $.turn.complete(turn(MIN_TURN_MS))
+  await clock.advance(10)
+  expect(played.map(soundOf)).toEqual(['scooby'])
+
+  expect(await run($, 'done none')).toContain('no sound')
+  await $.turn.complete(turn(MIN_TURN_MS))
+  await clock.advance(10)
+  expect(played).toHaveLength(1)
+
+  expect(await run($, 'play pikachu')).toBe('Playing pikachu.')
+  await clock.advance(10)
+  expect(played.map(soundOf)).toEqual(['scooby', 'pikachu'])
+
+  expect(await run($, 'ask bark')).toContain('There is no sound named "bark".')
+  expect(await run($, 'reset')).toContain(`ask  ${STARTERS.ask.join(', ')}`)
 })

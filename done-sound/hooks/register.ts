@@ -1,29 +1,49 @@
 import type { EngineInterface, Register } from 'claude-code'
 
+import { LIBRARY, MOMENTS, STARTERS, choicesOf, pick, requestOf } from './sounds'
+import type { Choices, Moment } from './sounds'
+
 // A turn shorter than this ends without a sound: you are still looking at the screen.
 export const MIN_TURN_MS = 10_000
 
-// The done sound is a file of the system; the ask sound is the mod's own file, a siren and two beeps.
-const DONE = { windows: 'tada.wav', mac: 'Glass.aiff' } as const
-const ASK = 'sounds/ask.wav'
+// The store key of the sounds the person chose with /sounds.
+const KEY = 'sounds'
 
-type Sound = 'done' | 'ask'
+const USAGE = [
+  'How to use it:',
+  '  /sounds                      show the sounds of each moment',
+  '  /sounds ask <names>          set the sounds for a question or a permission prompt',
+  '  /sounds done <names>         set the sounds for the end of a long turn',
+  '  /sounds ask none             play no sound for that moment (also for done)',
+  '  /sounds play <name>          play one sound now',
+  '  /sounds reset                go back to the starting sounds',
+  '',
+  'With more than one name, one of them plays each time, picked by chance.',
+].join('\n')
 
 // The notifications that mean Claude Code waits for an answer.
 const WAITING = new Set(['permission_prompt', 'elicitation_dialog'])
 
-// The command that plays the sound on this machine. `$.audio.play` plays nothing in a Windows terminal.
-const playerOf = async ($: EngineInterface, sound: Sound): Promise<string[]> => {
-  const windows = await $.env.get('SystemRoot')
+const load = async ($: EngineInterface): Promise<Choices> => choicesOf(await $.store.get(KEY))
 
-  if (windows === undefined) {
-    return ['afplay', sound === 'ask' ? `${$.plugin.root}/${ASK}` : `/System/Library/Sounds/${DONE.mac}`]
+const namesOf = (names: readonly string[]): string => (names.length === 0 ? 'no sound' : names.join(', '))
+
+const listOf = (choices: Choices): string =>
+  [
+    ...MOMENTS.map(moment => `${moment.padEnd(5)}${namesOf(choices[moment])}`),
+    '',
+    `All sounds: ${LIBRARY.join(', ')}`,
+    '',
+    USAGE,
+  ].join('\n')
+
+// The command that plays the sound on this machine. `$.audio.play` plays nothing in a Windows terminal.
+const playerOf = async ($: EngineInterface, name: string): Promise<string[]> => {
+  if ((await $.env.get('SystemRoot')) === undefined) {
+    return ['afplay', `${$.plugin.root}/sounds/${name}.wav`]
   }
 
-  const file =
-    sound === 'ask'
-      ? `${$.plugin.root}\\${ASK.replaceAll('/', '\\')}`
-      : `${windows}\\Media\\${DONE.windows}`
+  const file = `${$.plugin.root}\\sounds\\${name}.wav`
 
   return [
     'powershell.exe',
@@ -36,11 +56,11 @@ const playerOf = async ($: EngineInterface, sound: Sound): Promise<string[]> => 
 }
 
 // Starts the sound and returns at once, so the hook does not wait for the sound to end.
-const play = ($: EngineInterface, sound: Sound): void => {
+const play = ($: EngineInterface, name: string): void => {
   $.clock.after(1, () => {
     void (async () => {
       try {
-        await $.process.run(await playerOf($, sound), { timeoutMs: 10_000 })
+        await $.process.run(await playerOf($, name), { timeoutMs: 10_000 })
       } catch {
         // No player on this machine: stay silent.
       }
@@ -48,10 +68,57 @@ const play = ($: EngineInterface, sound: Sound): void => {
   })
 }
 
+// The sound each moment played last, so the same one does not play twice in a row.
+type Last = Partial<Record<Moment, string>>
+
+const playFor = async ($: EngineInterface, moment: Moment, last: Last): Promise<void> => {
+  const name = pick((await load($))[moment], last[moment], Math.random())
+
+  if (name === undefined) return
+
+  last[moment] = name
+  play($, name)
+}
+
 export const register: Register = on => {
   // When each running main turn began, by its id.
   const startedAt = new Map<string, number>()
+  const last: Last = {}
   let openQuestions = 0
+
+  on('session.start', async ($, e, next) => {
+    await $.command.register({
+      name: 'sounds',
+      description: 'Choose the sounds for a question and for the end of a long turn',
+      argumentHint: '[ask <names> | done <names> | play <name> | reset]',
+    })
+
+    return next(e)
+  })
+
+  on('command.run', { command: 'sounds' }, async ($, e) => {
+    const request = requestOf(e.args)
+
+    switch (request.action) {
+      case 'list':
+        return { text: listOf(await load($)) }
+      case 'set': {
+        await $.store.set(KEY, { ...(await load($)), [request.moment]: request.names })
+
+        return { text: `The "${request.moment}" moment now plays: ${namesOf(request.names)}.` }
+      }
+      case 'play':
+        play($, request.name)
+
+        return { text: `Playing ${request.name}.` }
+      case 'reset':
+        await $.store.delete(KEY)
+
+        return { text: `The sounds are the starting ones again.\n\n${listOf(STARTERS)}` }
+      case 'help':
+        return { text: `${request.problem}\n\n${listOf(await load($))}` }
+    }
+  })
 
   on('turn.start', async ($, e, next) => {
     const started = await next(e)
@@ -68,7 +135,7 @@ export const register: Register = on => {
     const elapsedMs = began === undefined ? 0 : (await $.clock.now()) - began
 
     if (e.agentId === undefined && !e.isAborted && Math.max(e.durationMs, elapsedMs) >= MIN_TURN_MS) {
-      play($, 'done')
+      await playFor($, 'done', last)
     }
 
     return next(e)
@@ -76,7 +143,7 @@ export const register: Register = on => {
 
   // Claude asks a question, or another mod asks one through the same dialog.
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
-    play($, 'ask')
+    await playFor($, 'ask', last)
     openQuestions += 1
 
     try {
@@ -86,10 +153,10 @@ export const register: Register = on => {
     }
   })
 
-  on('classic.Notification', ($, e, next) => {
+  on('classic.Notification', async ($, e, next) => {
     // While a question dialog is open, the notification is about that dialog, which had its sound.
     if (WAITING.has(e.notification_type) && openQuestions === 0) {
-      play($, 'ask')
+      await playFor($, 'ask', last)
     }
 
     return next(e)
