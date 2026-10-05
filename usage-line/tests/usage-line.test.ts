@@ -179,10 +179,10 @@ test('uses the saved style when a session starts', async ($, on) => {
       cost: { usd: 0 },
     },
   }))
-  on('session.model', () => ({ value: undefined }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('settings.read', () => ({ value: {} }))
 
   await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
 
-  expect(await lineOf($, 120)).toBe('$0.00 · ███░░░░░░░ 38%')
+  expect(await lineOf($, 120)).toBe('opus-5-5 · $0.00 · ███░░░░░░░ 38%')
 })
