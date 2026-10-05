@@ -1,0 +1,7 @@
+{
+  "name": "mod-lab",
+  "version": "0.1.0",
+  "description": "Shows what mods can do: a live list of events, a dump of what a mod can read, and demos you run with one press.",
+  "author": { "name": "Anand Chapla", "email": "anand.chapla@yahoo.com" },
+  "types": "./types/index.d.ts"
+}

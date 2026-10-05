@@ -1,3 +1,6 @@
 # Files Claude Code writes again each time it loads a mod.
 */.claude-plugin/types/
 */tsconfig.json
+
+# Dumps that the mod-lab mod writes. They can hold private text.
+.mod-lab/
