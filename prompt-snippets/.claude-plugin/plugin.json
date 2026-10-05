@@ -1,0 +1,6 @@
+{
+  "name": "prompt-snippets",
+  "version": "0.1.0",
+  "description": "Replaces short names such as ;plan in your prompt with longer texts that you saved.",
+  "author": { "name": "Anand Chapla", "email": "anand.chapla@yahoo.com" }
+}
