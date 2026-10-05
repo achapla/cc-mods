@@ -1,15 +1,11 @@
-// Every sound of the mod. Each name is a file in the sounds folder: sounds/<name>.wav.
-// To add a sound, put its .wav file in that folder and add its name here.
-export const LIBRARY = [
-  'siren',
-  'faaah',
-  'error',
-  'khatam',
-  'matrix-phone',
-  'scooby',
-  'pikachu',
-  'dun-dun-dun',
-] as const
+// Every sound of the mod is a file in the sounds folder: sounds/<name>.wav.
+// To add a sound, put its .wav file in that folder. The mod reads the folder each time it needs the names.
+// A name is in small letters, and a file with a space or a comma in its name is left out: /sounds cannot name it.
+export const libraryOf = (files: readonly string[]): string[] =>
+  files
+    .map(file => /^([^\s,]+)\.wav$/i.exec(file)?.[1]?.toLowerCase())
+    .filter((name): name is string => name !== undefined)
+    .sort()
 
 export type Moment = 'ask' | 'done'
 export type Choices = Record<Moment, string[]>
@@ -22,19 +18,17 @@ export const STARTERS: Choices = {
   done: ['khatam', 'scooby', 'matrix-phone', 'pikachu', 'dun-dun-dun'],
 }
 
-const isSound = (name: string): boolean => (LIBRARY as readonly string[]).includes(name)
-
 const isMoment = (word: string | undefined): word is Moment => word === 'ask' || word === 'done'
 
 // The saved choices; a moment whose saved list is not a list of names keeps its starting sounds.
-export const choicesOf = (saved: unknown): Choices => {
+// A name with no file in the sounds folder is left out.
+export const choicesOf = (saved: unknown, library: readonly string[]): Choices => {
   const held = saved !== null && typeof saved === 'object' ? (saved as Record<string, unknown>) : {}
   const listOf = (moment: Moment): string[] => {
     const list = held[moment]
+    const names: unknown[] = Array.isArray(list) ? list : STARTERS[moment]
 
-    return Array.isArray(list)
-      ? list.filter((name): name is string => typeof name === 'string' && isSound(name))
-      : STARTERS[moment]
+    return names.filter((name): name is string => typeof name === 'string' && library.includes(name))
   }
 
   return { ask: listOf('ask'), done: listOf('done') }
@@ -56,7 +50,8 @@ export type Request =
   | { action: 'help'; problem: string }
 
 // What the text after /sounds asks for.
-export const requestOf = (args: string): Request => {
+export const requestOf = (args: string, library: readonly string[]): Request => {
+  const isSound = (name: string): boolean => library.includes(name)
   const [first, ...rest] = args.trim().toLowerCase().split(/[\s,]+/).filter(Boolean)
 
   if (first === undefined) return { action: 'list' }

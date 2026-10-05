@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-import { LIBRARY, MOMENTS, STARTERS, choicesOf, pick, requestOf } from './sounds'
+import { MOMENTS, choicesOf, libraryOf, pick, requestOf } from './sounds'
 import type { Choices, Moment } from './sounds'
 
 // A turn shorter than this ends without a sound: you are still looking at the screen.
@@ -24,15 +24,30 @@ const USAGE = [
 // The notifications that mean Claude Code waits for an answer.
 const WAITING = new Set(['permission_prompt', 'elicitation_dialog'])
 
-const load = async ($: EngineInterface): Promise<Choices> => choicesOf(await $.store.get(KEY))
+// The names of the sound files in the sounds folder now, so a file put there is a sound at once.
+const library = async ($: EngineInterface): Promise<string[]> => {
+  try {
+    const entries = await $.fs.list(`${$.plugin.root}/sounds`)
+
+    return libraryOf(entries.filter(entry => entry.kind === 'file').map(entry => entry.name))
+  } catch {
+    // No sounds folder: there is no sound to play.
+    return []
+  }
+}
+
+const load = async ($: EngineInterface, sounds: readonly string[]): Promise<Choices> =>
+  choicesOf(await $.store.get(KEY), sounds)
 
 const namesOf = (names: readonly string[]): string => (names.length === 0 ? 'no sound' : names.join(', '))
 
-const listOf = (choices: Choices): string =>
+const listOf = (choices: Choices, sounds: readonly string[]): string =>
   [
+    // Claude Code writes the mod's name before the first line, so the moments start on the next line to stay in a column.
+    'The sounds of each moment:',
     ...MOMENTS.map(moment => `${moment.padEnd(5)}${namesOf(choices[moment])}`),
     '',
-    `All sounds: ${LIBRARY.join(', ')}`,
+    `All sounds: ${namesOf(sounds)}`,
     '',
     USAGE,
   ].join('\n')
@@ -72,7 +87,7 @@ const play = ($: EngineInterface, name: string): void => {
 type Last = Partial<Record<Moment, string>>
 
 const playFor = async ($: EngineInterface, moment: Moment, last: Last): Promise<void> => {
-  const name = pick((await load($))[moment], last[moment], Math.random())
+  const name = pick((await load($, await library($)))[moment], last[moment], Math.random())
 
   if (name === undefined) return
 
@@ -97,13 +112,14 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'sounds' }, async ($, e) => {
-    const request = requestOf(e.args)
+    const sounds = await library($)
+    const request = requestOf(e.args, sounds)
 
     switch (request.action) {
       case 'list':
-        return { text: listOf(await load($)) }
+        return { text: listOf(await load($, sounds), sounds) }
       case 'set': {
-        await $.store.set(KEY, { ...(await load($)), [request.moment]: request.names })
+        await $.store.set(KEY, { ...(await load($, sounds)), [request.moment]: request.names })
 
         return { text: `The "${request.moment}" moment now plays: ${namesOf(request.names)}.` }
       }
@@ -114,9 +130,9 @@ export const register: Register = on => {
       case 'reset':
         await $.store.delete(KEY)
 
-        return { text: `The sounds are the starting ones again.\n\n${listOf(STARTERS)}` }
+        return { text: `The sounds are the starting ones again.\n\n${listOf(choicesOf(null, sounds), sounds)}` }
       case 'help':
-        return { text: `${request.problem}\n\n${listOf(await load($))}` }
+        return { text: `${request.problem}\n\n${listOf(await load($, sounds), sounds)}` }
     }
   })
 
