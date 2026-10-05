@@ -4,6 +4,11 @@
   "metadata": { "description": "Small mods for Claude Code." },
   "plugins": [
     {
+      "name": "no-new-branch",
+      "source": "./no-new-branch",
+      "description": "Asks you before any command that would create a new git branch or worktree."
+    },
+    {
       "name": "no-process-kill",
       "source": "./no-process-kill",
       "description": "Asks you before any command that would stop a running process."

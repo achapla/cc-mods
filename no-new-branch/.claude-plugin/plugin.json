@@ -1,0 +1,6 @@
+{
+  "name": "no-new-branch",
+  "version": "0.1.0",
+  "description": "Asks you before any command that would create a new git branch or worktree.",
+  "author": { "name": "Anand Chapla", "email": "anand.chapla@yahoo.com" }
+}
