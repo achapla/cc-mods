@@ -1,0 +1,6 @@
+{
+  "name": "done-sound",
+  "version": "0.1.0",
+  "description": "Plays a sound when a long turn ends and when Claude waits for your answer.",
+  "author": { "name": "Anand Chapla", "email": "anand.chapla@yahoo.com" }
+}
