@@ -174,3 +174,10 @@ To check and test one mod, I run these from the `cc-mods` folder:
 claude plugin validate usage-line
 claude plugin test usage-line
 ```
+
+## License
+
+The code is under the [MIT license](LICENSE). You can use it, copy it and change it.
+
+The sound files in `done-sound/sounds` are not mine. I downloaded them from
+[Myinstants](https://www.myinstants.com), and the license does not cover them.
