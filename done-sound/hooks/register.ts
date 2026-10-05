@@ -3,13 +3,11 @@ import type { EngineInterface, Register } from 'claude-code'
 // A turn shorter than this ends without a sound: you are still looking at the screen.
 export const MIN_TURN_MS = 10_000
 
-// The sound files of the system, for Windows and for macOS.
-const SOUNDS = {
-  done: { windows: 'chimes.wav', mac: 'Glass.aiff' },
-  ask: { windows: 'notify.wav', mac: 'Ping.aiff' },
-} as const
+// The done sound is a file of the system; the ask sound is the mod's own file, a siren and two beeps.
+const DONE = { windows: 'tada.wav', mac: 'Glass.aiff' } as const
+const ASK = 'sounds/ask.wav'
 
-type Sound = keyof typeof SOUNDS
+type Sound = 'done' | 'ask'
 
 // The notifications that mean Claude Code waits for an answer.
 const WAITING = new Set(['permission_prompt', 'elicitation_dialog'])
@@ -19,17 +17,21 @@ const playerOf = async ($: EngineInterface, sound: Sound): Promise<string[]> => 
   const windows = await $.env.get('SystemRoot')
 
   if (windows === undefined) {
-    return ['afplay', `/System/Library/Sounds/${SOUNDS[sound].mac}`]
+    return ['afplay', sound === 'ask' ? `${$.plugin.root}/${ASK}` : `/System/Library/Sounds/${DONE.mac}`]
   }
 
-  const file = `${windows}\\Media\\${SOUNDS[sound].windows}`
+  const file =
+    sound === 'ask'
+      ? `${$.plugin.root}\\${ASK.replaceAll('/', '\\')}`
+      : `${windows}\\Media\\${DONE.windows}`
 
   return [
     'powershell.exe',
     '-NoProfile',
     '-NonInteractive',
     '-Command',
-    `(New-Object System.Media.SoundPlayer '${file}').PlaySync()`,
+    // A single quote in the path is written twice inside a PowerShell string.
+    `(New-Object System.Media.SoundPlayer '${file.replaceAll("'", "''")}').PlaySync()`,
   ]
 }
 

@@ -43,7 +43,7 @@ test('plays the done sound when a long turn ends', async ($, on) => {
 
   expect(played).toHaveLength(1)
   expect(played[0]).toContain('powershell.exe')
-  expect(played[0]).toContain("'C:\\Windows\\Media\\chimes.wav'")
+  expect(played[0]).toContain("'C:\\Windows\\Media\\tada.wav'")
 })
 
 test('stays silent for a short turn, a stopped turn and a subagent turn', async ($, on) => {
@@ -77,7 +77,9 @@ test('plays the ask sound when a question dialog opens', async ($, on) => {
   await clock.advance(10)
 
   expect(played).toHaveLength(1)
-  expect(played[0]).toContain("'C:\\Windows\\Media\\notify.wav'")
+  // The mod's own file, not a system one.
+  expect(played[0]).toContain("\\sounds\\ask.wav'")
+  expect(played[0]).not.toContain('C:\\Windows\\Media')
 })
 
 test('plays the ask sound for a permission prompt, but not for other notifications', async ($, on) => {
@@ -88,7 +90,7 @@ test('plays the ask sound for a permission prompt, but not for other notificatio
   await clock.advance(10)
 
   expect(played).toHaveLength(1)
-  expect(played[0]).toContain('notify.wav')
+  expect(played[0]).toContain('ask.wav')
 })
 
 test('counts the time a dialog waited, which the reported duration leaves out', async ($, on) => {
@@ -100,7 +102,7 @@ test('counts the time a dialog waited, which the reported duration leaves out', 
   await clock.advance(10)
 
   expect(played).toHaveLength(1)
-  expect(played[0]).toContain('chimes.wav')
+  expect(played[0]).toContain('tada.wav')
 })
 
 test('plays one sound, not two, when a notification comes while a question is open', async ($, on) => {
