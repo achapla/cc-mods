@@ -4,6 +4,11 @@
   "metadata": { "description": "Small mods for Claude Code." },
   "plugins": [
     {
+      "name": "danger-check",
+      "source": "./danger-check",
+      "description": "Asks you before a command that can destroy work, such as rm -rf, git reset --hard or git push --force."
+    },
+    {
       "name": "no-new-branch",
       "source": "./no-new-branch",
       "description": "Asks you before any command that would create a new git branch or worktree."

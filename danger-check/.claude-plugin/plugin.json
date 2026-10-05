@@ -1,0 +1,6 @@
+{
+  "name": "danger-check",
+  "version": "0.1.0",
+  "description": "Asks you before a command that can destroy work, such as rm -rf, git reset --hard or git push --force.",
+  "author": { "name": "Anand Chapla", "email": "anand.chapla@yahoo.com" }
+}
