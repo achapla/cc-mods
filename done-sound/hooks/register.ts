@@ -47,8 +47,25 @@ const play = ($: EngineInterface, sound: Sound): void => {
 }
 
 export const register: Register = on => {
-  on('turn.complete', ($, e, next) => {
-    if (e.agentId === undefined && !e.isAborted && e.durationMs >= MIN_TURN_MS) {
+  // When each running main turn began, by its id.
+  const startedAt = new Map<string, number>()
+  let openQuestions = 0
+
+  on('turn.start', async ($, e, next) => {
+    const started = await next(e)
+    startedAt.set(started.turnId, await $.clock.now())
+
+    return started
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const began = startedAt.get(e.turnId)
+    startedAt.delete(e.turnId)
+
+    // `durationMs` leaves out the time a dialog waited for an answer, so the mod also measures itself.
+    const elapsedMs = began === undefined ? 0 : (await $.clock.now()) - began
+
+    if (e.agentId === undefined && !e.isAborted && Math.max(e.durationMs, elapsedMs) >= MIN_TURN_MS) {
       play($, 'done')
     }
 
@@ -56,14 +73,20 @@ export const register: Register = on => {
   })
 
   // Claude asks a question, or another mod asks one through the same dialog.
-  on('tool.call', { tool: 'AskUserQuestion' }, ($, e, next) => {
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     play($, 'ask')
+    openQuestions += 1
 
-    return next(e)
+    try {
+      return await next(e)
+    } finally {
+      openQuestions -= 1
+    }
   })
 
   on('classic.Notification', ($, e, next) => {
-    if (WAITING.has(e.notification_type)) {
+    // While a question dialog is open, the notification is about that dialog, which had its sound.
+    if (WAITING.has(e.notification_type) && openQuestions === 0) {
       play($, 'ask')
     }
 

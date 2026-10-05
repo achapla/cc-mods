@@ -16,6 +16,7 @@ const world = (on: On, variables: Record<string, string> = { SystemRoot: 'C:\\Wi
       value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
     }
   })
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => ({
     result: { questions: e.questions, answers: {} },
@@ -90,7 +91,59 @@ test('plays the ask sound for a permission prompt, but not for other notificatio
   expect(played[0]).toContain('notify.wav')
 })
 
-test('uses the macOS player when the machine is not Windows', async ($, on) => {
+test('counts the time a dialog waited, which the reported duration leaves out', async ($, on) => {
+  const { clock, played } = world(on)
+
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await clock.advance(20_000)
+  await $.turn.complete(turn(6000))
+  await clock.advance(10)
+
+  expect(played).toHaveLength(1)
+  expect(played[0]).toContain('chimes.wav')
+})
+
+test('plays one sound, not two, when a notification comes while a question is open', async ($, on) => {
+  const clock = mock.clock(on)
+  const played: string[] = []
+
+  mock.env(on, { SystemRoot: 'C:\\Windows' })
+  on('process.run', (_$, e) => {
+    played.push(e.argv.join(' '))
+
+    return {
+      value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+    }
+  })
+  on('classic.Notification', () => ({}))
+  // The dialog stays open while the engine raises its "waiting for input" notification.
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    await $.classic.Notification({ message: 'Claude is waiting', notification_type: 'elicitation_dialog' })
+
+    return { result: { questions: e.questions, answers: {} } }
+  })
+
+  await $.tool.call({
+    tool: 'AskUserQuestion',
+    questions: [
+      {
+        question: 'Which one?',
+        header: 'Choice',
+        options: [
+          { label: 'A', description: 'The first one' },
+          { label: 'B', description: 'The second one' },
+        ],
+        multiSelect: false,
+      },
+    ],
+  })
+  await $.classic.Notification({ message: 'Claude needs your permission', notification_type: 'permission_prompt' })
+  await clock.advance(10)
+
+  expect(played).toHaveLength(2)
+})
+
+test('uses the macOS player when the machine is not Windows',async ($, on) => {
   const { clock, played } = world(on, {})
 
   await $.turn.complete(turn(MIN_TURN_MS))
