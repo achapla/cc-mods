@@ -1,0 +1,3 @@
+# Files Claude Code writes again each time it loads a mod.
+*/.claude-plugin/types/
+*/tsconfig.json
