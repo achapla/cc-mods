@@ -34,6 +34,11 @@
       "description": "Replaces short names such as ;plan in your prompt with longer texts that you saved."
     },
     {
+      "name": "quote-selection",
+      "source": "./quote-selection",
+      "description": "The /quote command puts the text you selected with the mouse into your prompt as a quote."
+    },
+    {
       "name": "usage-line",
       "source": "./usage-line",
       "description": "Shows live session cost, context use, and the 5-hour and weekly limits in one line above the prompt."
