@@ -1,0 +1,6 @@
+{
+  "name": "pnpm-only",
+  "version": "0.1.0",
+  "description": "Blocks npm and npx commands and tells Claude the pnpm command to use instead.",
+  "author": { "name": "Anand Chapla", "email": "anand.chapla@yahoo.com" }
+}
