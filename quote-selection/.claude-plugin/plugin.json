@@ -1,6 +1,0 @@
-{
-  "name": "quote-selection",
-  "version": "0.1.0",
-  "description": "The /quote command puts the text you selected with the mouse into your prompt as a quote.",
-  "author": { "name": "Anand Chapla", "email": "anand.chapla@yahoo.com" }
-}
