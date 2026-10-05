@@ -1,6 +1,6 @@
 {
   "name": "usage-line",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shows live session cost, context use, and the 5-hour and weekly limits in one line above the prompt.",
   "author": { "name": "Anand Chapla", "email": "anand.chapla@yahoo.com" },
   "types": "./types/index.d.ts"

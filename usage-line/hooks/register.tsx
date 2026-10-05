@@ -1,14 +1,19 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionUsage } from 'claude-code'
 
-import type { Identity, Snapshot } from '../types'
+import type { Identity, Snapshot, Style } from '../types'
 import { COLORS } from './colors'
+import { DEFAULT_STYLE, NAMES, STYLES, styleOf } from './styles'
 
 const NO_IDENTITY: Identity = { user: null, model: null, effort: null }
 
 const latest = atom({ plugin: 'usage-line', key: 'latest' } as const, null)
 const now = atom({ plugin: 'usage-line', key: 'now' } as const, 0)
 const identity = atom({ plugin: 'usage-line', key: 'identity' } as const, NO_IDENTITY)
+const style = atom({ plugin: 'usage-line', key: 'style' } as const, DEFAULT_STYLE)
+
+// The store key of the style the person chose with /usage-style.
+const STYLE_KEY = 'style'
 
 const ORDER = ['five_hour', 'seven_day', 'spend_limit']
 const SEPARATOR = ' · '
@@ -91,15 +96,15 @@ const gaugesOf = (snapshot: Snapshot, nowMs: number): Gauge[] => {
   return gauges
 }
 
-const gaugePiecesOf = (gauge: Gauge, layout: Layout): Piece[] => {
+const gaugePiecesOf = (gauge: Gauge, layout: Layout, bar: Style): Piece[] => {
   const percent = Math.round(gauge.percent)
   const color = colorOf(percent)
   // Rounded down, so a bar is full only at 100%.
   const filled = Math.min(layout.cells, Math.max(0, Math.floor((percent / 100) * layout.cells)))
   const pieces: Piece[] = []
 
-  if (filled > 0) pieces.push({ text: '━'.repeat(filled), color })
-  if (filled < layout.cells) pieces.push({ text: '─'.repeat(layout.cells - filled) })
+  if (filled > 0) pieces.push({ text: STYLES[bar].filled.repeat(filled), color })
+  if (filled < layout.cells) pieces.push({ text: STYLES[bar].empty.repeat(layout.cells - filled) })
 
   pieces.push({ text: `${layout.cells > 0 ? ' ' : ''}${percent}%`, color, isBold: true })
 
@@ -109,7 +114,13 @@ const gaugePiecesOf = (gauge: Gauge, layout: Layout): Piece[] => {
 }
 
 // The line as groups of pieces, in a fixed order: user, model, effort, cost, then the gauges.
-const groupsOf = (who: Identity, snapshot: Snapshot, nowMs: number, layout: Layout): Piece[][] => {
+const groupsOf = (
+  who: Identity,
+  snapshot: Snapshot,
+  nowMs: number,
+  layout: Layout,
+  bar: Style,
+): Piece[][] => {
   const groups: Piece[][] = []
 
   if (who.user) groups.push([{ text: who.user, color: COLORS.user }])
@@ -121,7 +132,7 @@ const groupsOf = (who: Identity, snapshot: Snapshot, nowMs: number, layout: Layo
   }
 
   for (const gauge of gaugesOf(snapshot, nowMs)) {
-    groups.push(gaugePiecesOf(gauge, layout))
+    groups.push(gaugePiecesOf(gauge, layout, bar))
   }
 
   return groups
@@ -184,6 +195,15 @@ export const register: Register = on => {
     await record($, await $.session.usage())
     await identify($)
 
+    const saved = styleOf(await $.store.get(STYLE_KEY))
+    if (saved !== null) await update($, style, () => saved)
+
+    await $.command.register({
+      name: 'usage-style',
+      description: 'Choose how the bars of the usage line are drawn',
+      argumentHint: `[${NAMES.join(' | ')}]`,
+    })
+
     // Keeps the reset times current while no turn runs.
     $.clock.every(MINUTE, async () => {
       const time = await $.clock.now()
@@ -191,6 +211,28 @@ export const register: Register = on => {
     })
 
     return result
+  })
+
+  on('command.run', { command: 'usage-style' }, async ($, e) => {
+    const current = await read($, style)
+    const wanted = e.args.trim().toLowerCase()
+    const chosen = styleOf(wanted)
+
+    if (chosen === null) {
+      const list = NAMES.map(name => {
+        const { filled, empty } = STYLES[name]
+
+        return `  ${name.padEnd(6)}${filled.repeat(4)}${empty.repeat(6)}${name === current ? '  (in use)' : ''}`
+      })
+      const problem = wanted === '' ? [] : [`There is no style named "${wanted}".`, '']
+
+      return { text: [...problem, 'The bar styles:', ...list, '', 'Type /usage-style <name> to change it.'].join('\n') }
+    }
+
+    await $.store.set(STYLE_KEY, chosen)
+    await update($, style, () => chosen)
+
+    return { text: `The bars now use the "${chosen}" style.` }
   })
 
   on('session.measure', async ($, e, next) => {
@@ -229,7 +271,8 @@ export const register: Register = on => {
 
     const who = await read($, identity)
     const nowMs = await read($, now)
-    const lines = LAYOUTS.map(layout => piecesOf(groupsOf(who, snapshot, nowMs, layout)))
+    const bar = await read($, style)
+    const lines = LAYOUTS.map(layout => piecesOf(groupsOf(who, snapshot, nowMs, layout, bar)))
     const pieces = lines.find(line => widthOf(line) <= e.props.bodyColumns) ?? lines.at(-1) ?? []
 
     if (pieces.length === 0) {

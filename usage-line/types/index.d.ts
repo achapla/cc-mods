@@ -18,8 +18,11 @@ export type Identity = {
   effort: string | null
 }
 
+/** How a bar is drawn. */
+export type Style = 'small' | 'block' | 'thin'
+
 declare module 'claude-code' {
   interface PluginState {
-    'usage-line': { latest: Snapshot | null; now: number; identity: Identity }
+    'usage-line': { latest: Snapshot | null; now: number; identity: Identity; style: Style }
   }
 }

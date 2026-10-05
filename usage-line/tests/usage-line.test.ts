@@ -54,12 +54,12 @@ test('shows the cost and a bar for each percent on every surface', async ($, on)
     const texts = await ui.findAll({ type: 'Text' })
 
     expect(texts.map(text => text.text).join('')).toBe(
-      '$1.24 · ━━━─────── 38% · ━━━━━━━─── 78% 2h 10m · ━━━━━━━━━─ 91% 3d 4h',
+      '$1.24 · ■■■□□□□□□□ 38% · ■■■■■■■□□□ 78% 2h 10m · ■■■■■■■■■□ 91% 3d 4h',
     )
     expect((await ui.find({ type: 'Text', text: '38%' }))?.props.color).toBe(COLORS.low)
     expect((await ui.find({ type: 'Text', text: '78%' }))?.props.color).toBe(COLORS.high)
     expect((await ui.find({ type: 'Text', text: '91%' }))?.props.color).toBe(COLORS.full)
-    expect((await ui.find({ type: 'Text', text: '━━━━━━━━━' }))?.props.color).toBe(COLORS.full)
+    expect((await ui.find({ type: 'Text', text: '■■■■■■■■■' }))?.props.color).toBe(COLORS.full)
     expect((await ui.find({ type: 'Text', text: '$1.24' }))?.props.color).toBe(COLORS.cost)
     await ui.unmount()
   }
@@ -95,8 +95,8 @@ test('gets shorter in steps when the terminal is narrow', async ($, on) => {
 
   await measure($)
 
-  expect(await lineOf($, 60)).toBe('$1.24 · ━──── 38% · ━━━── 78% 2h 10m · ━━━━─ 91% 3d 4h')
-  expect(await lineOf($, 50)).toBe('$1.24 · ━──── 38% · ━━━── 78% · ━━━━─ 91%')
+  expect(await lineOf($, 60)).toBe('$1.24 · ■□□□□ 38% · ■■■□□ 78% 2h 10m · ■■■■□ 91% 3d 4h')
+  expect(await lineOf($, 50)).toBe('$1.24 · ■□□□□ 38% · ■■■□□ 78% · ■■■■□ 91%')
   expect(await lineOf($, 30)).toBe('$1.24 · 38% · 78% · 91%')
 })
 
@@ -110,7 +110,7 @@ test('shows 0% for a window that has reset since the last reading', async ($, on
 
   const line = await lineOf($, 120)
 
-  expect(line).toContain('────────── 0% · ')
+  expect(line).toContain('□□□□□□□□□□ 0% · ')
   expect(line).toContain('91% 3d 1h')
 })
 
@@ -120,5 +120,69 @@ test('shows only cost and context when the account has no limit windows', async 
 
   await measure($, [])
 
+  expect(await lineOf($, 120)).toBe('$1.24 · ■■■□□□□□□□ 38%')
+})
+
+const styleCommand = async ($: Engine, args: string) => {
+  const ran = await $.command.run({
+    command: 'usage-style',
+    args,
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 120 },
+  })
+
+  return ran.text ?? ''
+}
+
+test('/usage-style changes the bars and saves the choice', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const saved: unknown[] = []
+  on('store.set', (_$, e) => {
+    saved.push(e.value)
+
+    return { value: undefined }
+  })
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+
+  await measure($, [])
+
+  expect(await styleCommand($, 'block')).toContain('"block"')
+  expect(await lineOf($, 120)).toBe('$1.24 · ███░░░░░░░ 38%')
+
+  expect(await styleCommand($, 'THIN')).toContain('"thin"')
   expect(await lineOf($, 120)).toBe('$1.24 · ━━━─────── 38%')
+  expect(saved).toEqual(['block', 'thin'])
+})
+
+test('/usage-style with no name, or a wrong name, lists the styles and changes nothing', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mock.store(on, {})
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+
+  await measure($, [])
+
+  expect(await styleCommand($, '')).toContain('small ■■■■□□□□□□  (in use)')
+  expect(await styleCommand($, 'round')).toContain('There is no style named "round".')
+  expect(await lineOf($, 120)).toBe('$1.24 · ■■■□□□□□□□ 38%')
+})
+
+test('uses the saved style when a session starts', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mock.env(on, {})
+  mock.store(on, { style: 'block' })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.usage', () => ({
+    value: {
+      startedAt: NOW,
+      context: { window: 200_000, tokens: 76_000, percent: 38 },
+      rateLimits: [],
+      cost: { usd: 0 },
+    },
+  }))
+  on('session.model', () => ({ value: undefined }))
+  on('settings.read', () => ({ value: {} }))
+
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+
+  expect(await lineOf($, 120)).toBe('$0.00 · ███░░░░░░░ 38%')
 })
