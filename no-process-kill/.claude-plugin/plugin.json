@@ -1,0 +1,6 @@
+{
+  "name": "no-process-kill",
+  "version": "0.1.0",
+  "description": "Asks you before any command that would stop a running process.",
+  "author": { "name": "Anand Chapla", "email": "anand.chapla@yahoo.com" }
+}
