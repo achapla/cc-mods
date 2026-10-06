@@ -93,6 +93,35 @@ test('leaves a prompt alone when it was not typed, or has no known name', async 
   expect(toasts).toHaveLength(0)
 })
 
+test('expands the text after a slash command and leaves its name alone', async ($, on) => {
+  const { entered, toasts } = world(on)
+  const args: string[] = []
+
+  on('command.run', { command: 'work' }, (_$, e) => {
+    args.push(e.args)
+
+    return { text: '' }
+  })
+
+  const work = (typed: string, kind: 'composer' | 'sdk' = 'composer') =>
+    $.command.run({
+      command: 'work',
+      args: typed,
+      origin: { kind },
+      presentation: { isFullscreen: false, columns: 120 },
+    })
+
+  await work('#123\n;plan')
+  await work(';plan')
+  await work('#123')
+  await work(';plan', 'sdk')
+  await submit($, '/work #123\n;plan')
+
+  expect(args).toEqual([`#123\n${STARTERS.plan}`, STARTERS.plan, '#123', ';plan'])
+  expect(entered).toEqual(['/work #123\n;plan'])
+  expect(toasts).toEqual(['Expanded ;plan', 'Expanded ;plan'])
+})
+
 test('adds, lists, uses and removes a snippet', async ($, on) => {
   const { entered } = world(on)
 

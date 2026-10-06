@@ -5,6 +5,11 @@ import type { Snippets } from './snippets'
 
 const KEY = 'snippets'
 
+// Tells the person which names were replaced.
+const said = ($: EngineInterface, used: string[]): void => {
+  $.ui.toast(`Expanded ${used.map(name => `${MARK}${name}`).join(', ')}`)
+}
+
 const USAGE = [
   'How to use it:',
   `  Type ${MARK}name in a prompt, and it is replaced when you send the prompt.`,
@@ -71,7 +76,7 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    // Only what the person typed; a slash command keeps its text as typed.
+    // Only what the person typed; a slash command is expanded in 'command.run' below.
     if (e.origin.kind !== 'composer' || e.text.trimStart().startsWith('/')) {
       return next(e)
     }
@@ -80,8 +85,22 @@ export const register: Register = on => {
 
     if (used.length === 0) return next(e)
 
-    $.ui.toast(`Expanded ${used.map(name => `${MARK}${name}`).join(', ')}`)
+    said($, used)
 
     return next({ ...e, text })
+  })
+
+  // A slash command or a skill reads the text after its name from 'args', not from the prompt.
+  on('command.run', async ($, e, next) => {
+    // /snippets reads its own text as typed, so 'add x see ;plan' saves the name, not its text.
+    if (e.origin.kind !== 'composer' || e.command === 'snippets') return next(e)
+
+    const { text, used } = expand(e.args, await load($))
+
+    if (used.length === 0) return next(e)
+
+    said($, used)
+
+    return next({ ...e, args: text })
   })
 }
